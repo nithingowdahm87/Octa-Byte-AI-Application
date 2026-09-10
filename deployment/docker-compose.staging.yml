@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    depends_on:
+      - app
+    networks:
+      - staging_network
+    volumes:
+      - ./nginx/sites-enabled:/etc/nginx/conf.d
+
+  app:
+    image: ${IMAGE_URI:-my-flask-app:latest}
+    environment:
+      - DATABASE_HOST=db
+      - DATABASE_PORT=5432
+      - DATABASE_NAME=postgres
+      - DATABASE_USERNAME=postgres
+      - DATABASE_PASSWORD=staging_password
+    depends_on:
+      - db
+    networks:
+      - staging_network
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=staging_password
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    networks:
+      - staging_network
+
+networks:
+  staging_network:
+    driver: bridge
+
+volumes:
+  db_data:
