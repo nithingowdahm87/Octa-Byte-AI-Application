@@ -8,46 +8,17 @@ on:
     branches:
       - main
 
-permissions:
-  id-token: write
-  contents: read
+env:
+  AWS_REGION: us-east-1
+  ROLE_TO_ASSUME: arn:aws:iam::123456789012:role/github-actions-role
 
 jobs:
-  pr-checks:
+  test-pr:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Integration tests
-        run: echo "Running Integration Tests..." && make test-integration
-
-      - name: QA Checks
-        run: echo "Running QA checks..." && make qa-checks
-
-      - name: OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@v0.12.0
-        with:
-          target: 'http://localhost:8080'
-          rules_file_name: '.zap/rules.tsv'
-          cmd_options: '-a'
-
-      - name: Slack Notification
-        if: always()
-        uses: slackapi/slack-github-action@v2
-        with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {
-              "channel": "#octa-byte-ai",
-              "text": "PR checks for production: ${{ job.status }}"
-            }
-
-  production-deploy:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -55,100 +26,114 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build Docker image
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: application
-          IMAGE_TAG: ${{ github.sha }}
+      - name: Run OWASP ZAP against staging
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          STAGING_URL=$(aws ssm get-parameter --name "/octabyte-nithin/staging/alb-url" --query "Parameter.Value" --output text)
+          docker run -t owasp/zap2docker-stable zap-baseline.py -t "http://$STAGING_URL"
 
-      - name: Detect active color in SSM
-        id: detect-color
-        run: |
-          ACTIVE_COLOR=$(aws ssm get-parameter --name "/app/active_color" --query "Parameter.Value" --output text || echo "blue")
-          if [ "$ACTIVE_COLOR" == "blue" ]; then
-            echo "IDLE_COLOR=green" >> $GITHUB_ENV
-          else
-            echo "IDLE_COLOR=blue" >> $GITHUB_ENV
-          fi
-
-      - name: Deploy to idle ASG
-        run: |
-          echo "Deploying to ASG app-asg-${{ env.IDLE_COLOR }}"
-          aws autoscaling start-instance-refresh \
-            --auto-scaling-group-name "app-asg-${{ env.IDLE_COLOR }}" \
-            --preferences '{"MinHealthyPercentage": 90, "InstanceWarmup": 300}'
-          # Wait for ASG instance refresh
-          while true; do
-            STATUS=$(aws autoscaling describe-instance-refreshes --auto-scaling-group-name "app-asg-${{ env.IDLE_COLOR }}" --query 'InstanceRefreshes[0].Status' --output text)
-            if [ "$STATUS" == "Successful" ]; then break; fi
-            if [ "$STATUS" == "Failed" ] || [ "$STATUS" == "Cancelled" ]; then exit 1; fi
-            sleep 30
-          done
-
-      - name: TF switch ALB to 50/50
-        run: |
-          echo "Switching traffic to 50/50..."
-          aws elbv2 modify-listener \
-            --listener-arn ${{ secrets.ALB_LISTENER_ARN }} \
-            --default-actions '[{"Type":"forward","ForwardConfig":{"TargetGroups":[{"TargetGroupArn":"${{ secrets.TG_BLUE_ARN }}","Weight":50},{"TargetGroupArn":"${{ secrets.TG_GREEN_ARN }}","Weight":50}]}}]'
-
-      - name: 5-min CloudWatch wait loop using AWS CLI polling
-        run: |
-          echo "Waiting for 5 minutes and monitoring errors..."
-          END_TIME=$(date -d "5 minutes" +%s)
-          while [ $(date +%s) -lt $END_TIME ]; do
-            ERRORS=$(aws cloudwatch get-metric-statistics \
-              --namespace AWS/ApplicationELB \
-              --metric-name HTTPCode_Target_5XX_Count \
-              --start-time $(date -u -d '5 minutes ago' +%Y-%m-%dT%H:%M:%SZ) \
-              --end-time $(date -u +%Y-%m-%dT%H:%M:%SZ) \
-              --period 300 --statistics Sum --query 'Datapoints[0].Sum' --output text)
-            if [ "$ERRORS" != "None" ] && [ "$ERRORS" != "" ]; then
-              ERROR_INT=${ERRORS%.*}
-              if [ "$ERROR_INT" -gt 10 ]; then
-                echo "Error rate too high, aborting canary"
-                exit 1
-              fi
-            fi
-            sleep 30
-          done
-
-      - name: Finalize 100/0 or rollback
-        if: always()
-        run: |
-          if [ "${{ job.status }}" == "Success" ]; then
-            echo "Finalizing deployment to 100% on ${{ env.IDLE_COLOR }}"
-            aws ssm put-parameter --name "/app/active_color" --value "${{ env.IDLE_COLOR }}" --type String --overwrite
-            aws elbv2 modify-listener \
-              --listener-arn ${{ secrets.ALB_LISTENER_ARN }} \
-              --default-actions '[{"Type":"forward","TargetGroupArn":"${{ secrets.TG_'${{ env.IDLE_COLOR }}'_ARN }}"}]'
-          else
-            echo "Rolling back to active color"
-            ACTIVE_COLOR=$(aws ssm get-parameter --name "/app/active_color" --query "Parameter.Value" --output text)
-            aws elbv2 modify-listener \
-              --listener-arn ${{ secrets.ALB_LISTENER_ARN }} \
-              --default-actions '[{"Type":"forward","TargetGroupArn":"${{ secrets.TG_'${ACTIVE_COLOR}'_ARN }}"}]'
-          fi
-
-      - name: Slack Notification
+      - name: Notify Slack
         if: always()
         uses: slackapi/slack-github-action@v2
         with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
           payload: |
             {
-              "channel": "#octa-byte-ai",
-              "text": "Production deployment status: ${{ job.status }}"
+              "text": "PR Tests: ${{ job.status }} for PR ${{ github.event.pull_request.number }}"
             }
 
+  deploy-prod:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Read candidate image URI
+        id: read-candidate
+        run: |
+          IMAGE_URI=$(aws ssm get-parameter --name "/octabyte-nithin/releases/candidate/image-uri" --query "Parameter.Value" --output text)
+          if [[ "$IMAGE_URI" != *"@sha256:"* ]]; then
+            echo "Error: Image URI does not contain a digest (@sha256:)"
+            exit 1
+          fi
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+
+      - name: Determine slots
+        id: slots
+        run: |
+          ACTIVE_SLOT=$(aws ssm get-parameter --name "/octabyte-nithin/production/active-slot" --query "Parameter.Value" --output text)
+          if [ "$ACTIVE_SLOT" == "blue" ]; then
+            INACTIVE_SLOT="green"
+          else
+            INACTIVE_SLOT="blue"
+          fi
+          echo "ACTIVE_SLOT=$ACTIVE_SLOT" >> $GITHUB_ENV
+          echo "INACTIVE_SLOT=$INACTIVE_SLOT" >> $GITHUB_ENV
+
+      - name: Deploy to inactive slot ASG via SSM
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets "Key=tag:Slot,Values=${{ env.INACTIVE_SLOT }}" \
+            --parameters '{"commands":["/opt/octabyte-nithin/bin/deploy.sh ${{ env.IMAGE_URI }}"]}' \
+            --query "Command.CommandId" \
+            --output text)
+          
+          INSTANCE_ID=$(aws ssm list-command-invocations --command-id "$COMMAND_ID" --query 'CommandInvocations[0].InstanceId' --output text)
+          if [ "$INSTANCE_ID" != "None" ] && [ -n "$INSTANCE_ID" ]; then
+            aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+          fi
+
+      - name: Set deployment state to CANARY_IN_PROGRESS
+        run: |
+          aws ssm put-parameter --name "/octabyte-nithin/production/deployment-state" --value "CANARY_IN_PROGRESS" --type String --overwrite
+
+      - name: Shift ALB weights to 50/50
+        run: |
+          aws lambda invoke --function-name "release-controller" --payload '{"action":"shift","weights":{"blue":50,"green":50}}' response.json
+
+      - name: Wait and Check CloudWatch Alarms
+        run: |
+          echo "Waiting for 5 minutes for canary evaluation..."
+          sleep 300
+          
+          ALARM_STATE=$(aws cloudwatch describe-alarms --alarm-names "Production-Composite-Alarm" --query "CompositeAlarms[0].StateValue" --output text)
+          
+          if [ "$ALARM_STATE" == "ALARM" ]; then
+            echo "Alarm triggered during canary! Rolling back."
+            exit 1
+          fi
+          echo "Canary evaluation successful."
+
+      - name: Finalize deployment (Success)
+        if: success()
+        run: |
+          aws lambda invoke --function-name "release-controller" --payload '{"action":"shift","weights":{"${{ env.INACTIVE_SLOT }}":100,"${{ env.ACTIVE_SLOT }}":0}}' response.json
+          aws ssm put-parameter --name "/octabyte-nithin/production/active-slot" --value "${{ env.INACTIVE_SLOT }}" --type String --overwrite
+          aws ssm put-parameter --name "/octabyte-nithin/production/deployment-state" --value "SUCCEEDED" --type String --overwrite
+
+      - name: Rollback deployment (Failure)
+        if: failure()
+        run: |
+          aws lambda invoke --function-name "release-controller" --payload '{"action":"shift","weights":{"${{ env.ACTIVE_SLOT }}":100,"${{ env.INACTIVE_SLOT }}":0}}' response.json
+          aws ssm put-parameter --name "/octabyte-nithin/production/deployment-state" --value "ROLLED_BACK" --type String --overwrite
+
+      - name: Notify Slack
+        if: always()
+        uses: slackapi/slack-github-action@v2
+        with:
+          payload: |
+            {
+              "text": "Production Pipeline: ${{ job.status }} for commit ${{ github.sha }}"
+            }

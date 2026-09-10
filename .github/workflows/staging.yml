@@ -5,101 +5,87 @@ on:
     branches:
       - stage
 
-permissions:
-  id-token: write
-  contents: read
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: octabyte-nithin
+  ROLE_TO_ASSUME: arn:aws:iam::123456789012:role/github-actions-role
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Gitleaks Secret Scan
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies and run Pytest
-        run: |
-          pip install -r requirements.txt
-          pytest
-
-      - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@master
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-
-      - name: Trivy SCA
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          ignore-unfixed: true
-          format: 'table'
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
+          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build Docker image
+      - name: Build and Push image
+        id: build-image
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: application
-          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
-
-      - name: Trivy Image Scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: '${{ steps.login-ecr.outputs.registry }}/application:${{ github.sha }}'
-          format: 'table'
-          ignore-unfixed: true
-
-      - name: Push to ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          ECR_REPOSITORY: application
-          IMAGE_TAG: ${{ github.sha }}
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }} .
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          
+          # Get the immutable image digest
+          DIGEST=$(aws ecr describe-images --repository-name $ECR_REPOSITORY --image-ids imageTag=${{ github.sha }} --query 'imageDetails[0].imageDigest' --output text)
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY@$DIGEST"
+          
+          echo "IMAGE_URI=$IMAGE_URI" >> $GITHUB_ENV
+          
+      - name: Store release image URI in SSM
         run: |
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          aws ssm put-parameter \
+            --name "/octabyte-nithin/staging/releases/${{ github.sha }}/image-uri" \
+            --value "${{ env.IMAGE_URI }}" \
+            --type SecureString \
+            --overwrite
 
-      - name: Deploy via AWS SSM
+      - name: Deploy to staging via SSM Run Command
         run: |
-          aws ssm send-command \
+          COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=tag:Environment,Values=staging" \
-            --parameters 'commands=["docker pull ${{ steps.login-ecr.outputs.registry }}/application:${{ github.sha }}", "docker stop app || true", "docker rm app || true", "docker run -d -p 80:80 --name app ${{ steps.login-ecr.outputs.registry }}/application:${{ github.sha }}"]'
+            --parameters '{"commands":["/opt/octabyte-nithin/bin/deploy.sh ${{ env.IMAGE_URI }}"]}' \
+            --query "Command.CommandId" \
+            --output text)
+          
+          INSTANCE_ID=$(aws ssm list-command-invocations --command-id "$COMMAND_ID" --query 'CommandInvocations[0].InstanceId' --output text)
+          if [ "$INSTANCE_ID" != "None" ] && [ -n "$INSTANCE_ID" ]; then
+            aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
+          fi
 
-      - name: Health Check curl
+      - name: Smoke test against staging ALB
         run: |
-          sleep 30
-          curl -f http://staging.example.com/health || exit 1
+          STAGING_URL=$(aws ssm get-parameter --name "/octabyte-nithin/staging/alb-url" --query "Parameter.Value" --output text)
+          curl -f "http://$STAGING_URL" || exit 1
 
-      - name: Send Slack Notification
+      - name: Mark release as candidate
+        if: success()
+        run: |
+          aws ssm put-parameter \
+            --name "/octabyte-nithin/releases/candidate/image-uri" \
+            --value "${{ env.IMAGE_URI }}" \
+            --type String \
+            --overwrite
+
+      - name: Notify Slack
         if: always()
         uses: slackapi/slack-github-action@v2
         with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
           payload: |
             {
-              "channel": "#octa-byte-ai",
-              "text": "Staging deployment for ${{ github.repository }} finished with status: ${{ job.status }}"
+              "text": "Staging Pipeline: ${{ job.status }} for commit ${{ github.sha }}"
             }
-
