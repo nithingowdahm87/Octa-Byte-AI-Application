@@ -2,14 +2,28 @@ from flask import Flask
 from flask import request, render_template, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from config import BaseConfig
-
+from prometheus_flask_exporter import PrometheusMetrics
 
 app = Flask(__name__)
 app.config.from_object(BaseConfig)
 db = SQLAlchemy(app)
-
+metrics = PrometheusMetrics(app)
 
 from models import *
+
+@app.get("/health")
+def health():
+    return {"status": "healthy"}, 200
+
+@app.get("/ready")
+def ready():
+    try:
+        # Execute a lightweight PostgreSQL connectivity check
+        db.session.execute(db.text('SELECT 1'))
+        return {"status": "ready"}, 200
+    except Exception:
+        return {"status": "not ready"}, 503
+
 
 
 @app.route('/', methods=['GET'])
