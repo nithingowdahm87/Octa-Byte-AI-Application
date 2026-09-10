@@ -43,10 +43,16 @@ jobs:
           exit-code: '0'
 
       - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@master
+        uses: SonarSource/sonarqube-scan-action@v7
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >-
+            -Dsonar.projectKey=octa
+            -Dsonar.projectName=octa
+            -Dsonar.sources=.
+            -Dsonar.sourceEncoding=UTF-8
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
