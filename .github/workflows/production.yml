@@ -9,8 +9,8 @@ on:
       - main
 
 env:
-  AWS_REGION: us-east-1
-  ROLE_TO_ASSUME: arn:aws:iam::123456789012:role/github-actions-role
+  AWS_REGION: ap-south-1
+  ROLE_TO_ASSUME: ${{ secrets.AWS_PRODUCTION_DEPLOY_ROLE_ARN }}
 
 jobs:
   test-pr:
