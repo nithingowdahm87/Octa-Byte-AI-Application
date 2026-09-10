@@ -36,55 +36,9 @@ services:
     networks:
       - staging_network
 
-  sonarqube:
-    image: sonarqube:community
-    container_name: sonarqube
-    hostname: sonarqube
-    depends_on:
-      sonar_db:
-        condition: service_healthy
-    environment:
-      SONAR_JDBC_URL: jdbc:postgresql://sonar_db:5432/sonar
-      SONAR_JDBC_USERNAME: sonar
-      SONAR_JDBC_PASSWORD: change-this-password
-    volumes:
-      - sonarqube_data:/opt/sonarqube/data
-      - sonarqube_extensions:/opt/sonarqube/extensions
-      - sonarqube_logs:/opt/sonarqube/logs
-      - sonarqube_temp:/opt/sonarqube/temp
-    ports:
-      - "9000:9000"
-    restart: unless-stopped
-    networks:
-      - staging_network
-
-  sonar_db:
-    image: postgres:17
-    container_name: sonarqube-db
-    hostname: postgresql
-    environment:
-      POSTGRES_USER: sonar
-      POSTGRES_PASSWORD: change-this-password
-      POSTGRES_DB: sonar
-    volumes:
-      - postgresql_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sonar -d sonar"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    restart: unless-stopped
-    networks:
-      - staging_network
-
 networks:
   staging_network:
     driver: bridge
 
 volumes:
   db_data:
-  sonarqube_data:
-  sonarqube_extensions:
-  sonarqube_logs:
-  sonarqube_temp:
-  postgresql_data:
