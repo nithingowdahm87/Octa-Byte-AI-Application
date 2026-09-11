@@ -41,7 +41,7 @@ jobs:
           TAG_SHA="sha-${{ github.sha }}"
           TAG_STAGING="staging-${SHORT_SHA}"
           
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$TAG_SHA -t $ECR_REGISTRY/$ECR_REPOSITORY:$TAG_STAGING .
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$TAG_SHA -t $ECR_REGISTRY/$ECR_REPOSITORY:$TAG_STAGING ./web
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$TAG_SHA
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$TAG_STAGING
           
@@ -85,9 +85,11 @@ jobs:
             --overwrite
 
       - name: Notify Slack
-        if: always()
+        if: always() && secrets.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v2
         with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
           payload: |
             {
               "text": "Staging Pipeline: ${{ job.status }} for commit ${{ github.sha }}"
