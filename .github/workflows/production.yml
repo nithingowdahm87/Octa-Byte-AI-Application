@@ -43,6 +43,7 @@ jobs:
   deploy-prod:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    environment: production
     permissions:
       id-token: write
       contents: read
