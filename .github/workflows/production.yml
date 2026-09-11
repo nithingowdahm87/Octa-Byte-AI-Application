@@ -105,7 +105,7 @@ jobs:
 
       - name: Shift ALB weights to 50/50
         run: |
-          aws lambda invoke --function-name "release-controller" --payload '{"action":"shift","weights":{"blue":50,"green":50}}' response.json
+          aws lambda invoke --function-name "release-controller" --cli-binary-format raw-in-base64-out --payload '{"action":"shift","weights":{"blue":50,"green":50}}' response.json
 
       - name: Wait and Check CloudWatch Alarms
         run: |
@@ -123,14 +123,14 @@ jobs:
       - name: Finalize deployment (Success)
         if: success()
         run: |
-          aws lambda invoke --function-name "release-controller" --payload '{"action":"shift","weights":{"${{ env.INACTIVE_SLOT }}":100,"${{ env.ACTIVE_SLOT }}":0}}' response.json
+          aws lambda invoke --function-name "release-controller" --cli-binary-format raw-in-base64-out --payload '{"action":"shift","weights":{"${{ env.INACTIVE_SLOT }}":100,"${{ env.ACTIVE_SLOT }}":0}}' response.json
           aws ssm put-parameter --name "/octabyte-nithin/production/active-slot" --value "${{ env.INACTIVE_SLOT }}" --type String --overwrite
           aws ssm put-parameter --name "/octabyte-nithin/production/deployment-state" --value "SUCCEEDED" --type String --overwrite
 
       - name: Rollback deployment (Failure)
         if: failure()
         run: |
-          aws lambda invoke --function-name "release-controller" --payload '{"action":"shift","weights":{"${{ env.ACTIVE_SLOT }}":100,"${{ env.INACTIVE_SLOT }}":0}}' response.json
+          aws lambda invoke --function-name "release-controller" --cli-binary-format raw-in-base64-out --payload '{"action":"shift","weights":{"${{ env.ACTIVE_SLOT }}":100,"${{ env.INACTIVE_SLOT }}":0}}' response.json
           aws ssm put-parameter --name "/octabyte-nithin/production/deployment-state" --value "ROLLED_BACK" --type String --overwrite
 
       - name: Notify Slack
