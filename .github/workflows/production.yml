@@ -36,12 +36,10 @@ jobs:
 
       - name: Notify Slack
         if: always()
-        uses: slackapi/slack-github-action@v2
-        with:
-          payload: |
-            {
-              "text": "PR Tests: ${{ job.status }} for PR ${{ github.event.pull_request.number }}"
-            }
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"PR Tests: ${{ job.status }} for PR ${{ github.event.pull_request.number }}. \\nRepo: ${{ github.repository }}\\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
 
   deploy-prod:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -131,9 +129,7 @@ jobs:
 
       - name: Notify Slack
         if: always()
-        uses: slackapi/slack-github-action@v2
-        with:
-          payload: |
-            {
-              "text": "Production Pipeline: ${{ job.status }} for commit ${{ github.sha }}"
-            }
+        run: |
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"Production Pipeline: ${{ job.status }} for commit ${{ github.sha }}. \\nRepo: ${{ github.repository }}\\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
