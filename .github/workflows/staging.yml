@@ -84,17 +84,6 @@ jobs:
             --type String \
             --overwrite
 
-      - name: Notify Slack
-        if: always() && secrets.SLACK_WEBHOOK_URL != ''
-        uses: slackapi/slack-github-action@v2
-        with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
-          payload: |
-            {
-              "text": "Staging Pipeline: ${{ job.status }} for commit ${{ github.sha }}"
-            }
-
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
