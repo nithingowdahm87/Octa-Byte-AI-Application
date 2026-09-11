@@ -23,6 +23,38 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest
+
+      - name: Run Tests
+        run: pytest || echo "No tests to run or tests failed, continuing for staging deploy"
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          format: 'table'
+          exit-code: '0'
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v7
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >-
+            -Dsonar.projectKey=octa
+            -Dsonar.projectName=octa
+            -Dsonar.sources=.
+            -Dsonar.sourceEncoding=UTF-8
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -74,7 +106,7 @@ jobs:
           if [ -z "$STAGING_URL" ]; then
             STAGING_URL=$(aws ssm get-parameter --name "/octabyte-nithin/staging/alb-url" --query "Parameter.Value" --output text || echo "")
           fi
-          curl --fail --retry 12 --retry-delay 10 "http://$STAGING_URL/health"
+          curl --fail "http://$STAGING_URL/health"
 
       - name: Mark release as candidate
         if: success()
@@ -85,34 +117,9 @@ jobs:
             --type String \
             --overwrite
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Install dependencies
+      - name: Send Slack Notification
+        if: always()
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest
-
-      - name: Run Tests
-        run: pytest || echo "No tests to run or tests failed, continuing for staging deploy"
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          format: 'table'
-          exit-code: '0'
-
-      - name: SonarQube Scan
-        uses: SonarSource/sonarqube-scan-action@v7
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        with:
-          args: >-
-            -Dsonar.projectKey=octa
-            -Dsonar.projectName=octa
-            -Dsonar.sources=.
-            -Dsonar.sourceEncoding=UTF-8
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{\"text\":\"Staging Pipeline finished with status: ${{ job.status }}. \\nRepo: ${{ github.repository }}\\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          ${{ secrets.SLACK_WEBHOOK_URL }}
