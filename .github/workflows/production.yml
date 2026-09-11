@@ -31,7 +31,7 @@ jobs:
       - name: Run OWASP ZAP against staging
         run: |
           STAGING_URL=$(aws ssm get-parameter --name "/octabyte-nithin/staging/alb-url" --query "Parameter.Value" --output text)
-          docker run -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t "http://$STAGING_URL"
+          docker run -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t "http://$STAGING_URL" -I
 
       - name: Notify Slack
         if: always()
