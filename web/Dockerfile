@@ -16,10 +16,9 @@ RUN python -m venv /venv && \
     /venv/bin/pip install -r requirements.txt
 
 # Remove system-level setuptools, pip, and msgpack to silence Trivy false positives on the base image
-RUN rm -rf /usr/local/lib/python3.12/site-packages/setuptools* \
-           /usr/local/lib/python3.12/site-packages/pip* \
-           /usr/local/lib/python3.12/site-packages/msgpack* \
-           /usr/local/lib/python3.12/ensurepip
+RUN find /usr -name "setuptools*" -exec rm -rf {} + || true && \
+    find /usr -name "msgpack*" -exec rm -rf {} + || true && \
+    find /usr -name "pip*" -exec rm -rf {} + || true
 
 COPY . .
 
