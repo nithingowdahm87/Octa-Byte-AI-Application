@@ -10,11 +10,21 @@ WORKDIR /home/appuser
 
 COPY requirements.txt requirements.txt
 
-RUN python -m pip install --upgrade pip setuptools && python -m pip install -r requirements.txt
+# Create venv and install dependencies
+RUN python -m venv /venv && \
+    /venv/bin/pip install --upgrade pip setuptools && \
+    /venv/bin/pip install -r requirements.txt
+
+# Remove system-level setuptools, pip, and msgpack to silence Trivy false positives on the base image
+RUN rm -rf /usr/local/lib/python3.12/site-packages/setuptools* \
+           /usr/local/lib/python3.12/site-packages/pip* \
+           /usr/local/lib/python3.12/site-packages/msgpack* \
+           /usr/local/lib/python3.12/ensurepip
 
 COPY . .
 
-RUN chown -R appuser:appuser /home/appuser
+RUN chown -R appuser:appuser /home/appuser /venv
 USER appuser
+ENV PATH="/venv/bin:$PATH"
 
 CMD ["gunicorn", "--bind", "0.0.0.0:8000", "app:app"]
