@@ -1,10 +1,11 @@
-FROM python:3.12-slim
+FROM python:3.12-alpine
 
-# Upgrade OS packages to patch known CVEs
-RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+# Upgrade OS packages and install build dependencies
+RUN apk update && apk upgrade && \
+    apk add --no-cache postgresql-dev gcc python3-dev musl-dev
 
 # Run as non-root user
-RUN useradd --create-home appuser
+RUN adduser -D appuser
 WORKDIR /home/appuser
 
 COPY requirements.txt requirements.txt
