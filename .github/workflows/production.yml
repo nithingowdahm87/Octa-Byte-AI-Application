@@ -10,7 +10,6 @@ on:
 
 env:
   AWS_REGION: ap-south-1
-  ROLE_TO_ASSUME: ${{ secrets.AWS_PRODUCTION_DEPLOY_ROLE_ARN }}
 
 jobs:
   test-pr:
@@ -26,13 +25,13 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_STAGING_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Run OWASP ZAP against staging
         run: |
           STAGING_URL=$(aws ssm get-parameter --name "/octabyte-nithin/staging/alb-url" --query "Parameter.Value" --output text)
-          docker run -t owasp/zap2docker-stable zap-baseline.py -t "http://$STAGING_URL"
+          docker run -t ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t "http://$STAGING_URL" -I
 
       - name: Notify Slack
         if: always()
@@ -54,7 +53,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.ROLE_TO_ASSUME }}
+          role-to-assume: ${{ secrets.AWS_PRODUCTION_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Read candidate image URI
