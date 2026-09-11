@@ -37,7 +37,7 @@ jobs:
         if: always()
         run: |
           curl -X POST -H 'Content-type: application/json' \
-          --data "{\"text\":\"PR Tests: ${{ job.status }} for PR ${{ github.event.pull_request.number }}. \\nRepo: ${{ github.repository }}\\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          --data "{\"text\":\"PR Tests: ${{ job.status }} for PR ${{ github.event.pull_request.number }}. \nRepo: ${{ github.repository }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
           ${{ secrets.SLACK_WEBHOOK_URL }}
 
   deploy-prod:
@@ -50,12 +50,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Debug Secret
-        run: |
-          echo "Secret length is ${#SECRET_VAL}"
-        env:
-          SECRET_VAL: ${{ secrets.AWS_PRODUCTION_DEPLOY_ROLE_ARN }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -90,7 +84,7 @@ jobs:
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=tag:Slot,Values=${{ env.INACTIVE_SLOT }}" \
-            --parameters '{"commands":["/opt/octabyte-nithin/bin/deploy.sh ${{ env.IMAGE_URI }}"]}' \
+            --parameters "{\"commands\":[\"/opt/octabyte-nithin/bin/deploy.sh ${{ env.IMAGE_URI }}\"]}" \
             --query "Command.CommandId" \
             --output text)
           
@@ -111,14 +105,14 @@ jobs:
         run: |
           echo "Waiting for 5 minutes for canary evaluation..."
           sleep 300
-          
-          ALARM_STATE=$(aws cloudwatch describe-alarms --alarm-names "Production-Composite-Alarm" --query "CompositeAlarms[0].StateValue" --output text)
-          
+
+          ALARM_STATE=$(aws cloudwatch describe-alarms --alarm-names "octabyte-nithin-production-canary-rollback" --query "CompositeAlarms[0].StateValue" --output text)
+
           if [ "$ALARM_STATE" == "ALARM" ]; then
             echo "Alarm triggered during canary! Rolling back."
             exit 1
           fi
-          echo "Canary evaluation successful."
+          echo "Canary evaluation successful. Alarm state: $ALARM_STATE"
 
       - name: Finalize deployment (Success)
         if: success()
@@ -137,5 +131,5 @@ jobs:
         if: always()
         run: |
           curl -X POST -H 'Content-type: application/json' \
-          --data "{\"text\":\"Production Pipeline: ${{ job.status }} for commit ${{ github.sha }}. \\nRepo: ${{ github.repository }}\\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+          --data "{\"text\":\"Production Pipeline: ${{ job.status }} for commit ${{ github.sha }}. \nRepo: ${{ github.repository }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
           ${{ secrets.SLACK_WEBHOOK_URL }}
