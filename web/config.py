@@ -51,4 +51,4 @@ class BaseConfig(object):
         host=DATABASE_HOST,
         port=DATABASE_PORT,
         database=DATABASE_NAME
-    ).render_as_string(hide_password=False)
+    )

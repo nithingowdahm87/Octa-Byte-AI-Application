@@ -33,10 +33,10 @@ jobs:
       - name: Run Tests
         run: |
           if [ -f web/requirements.txt ]; then pip install -r web/requirements.txt; fi
-          pip install pytest
+          pip install pytest pytest-cov
 
           set +e
-          cd web && pytest
+          cd web && pytest --cov=. --cov-report=xml
           EXIT_CODE=$?
           set -e
 
@@ -71,6 +71,7 @@ jobs:
             -Dsonar.sourceEncoding=UTF-8
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=600
+            -Dsonar.python.coverage.reportPaths=web/coverage.xml
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@5579c002bb4778aa43395ef1df492868a9a1c83f # v4.0.2
