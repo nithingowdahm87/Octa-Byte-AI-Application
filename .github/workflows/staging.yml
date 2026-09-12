@@ -32,11 +32,11 @@ jobs:
 
       - name: Run Tests
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f web/requirements.txt ]; then pip install -r web/requirements.txt; fi
           pip install pytest
 
           set +e
-          pytest
+          cd web && pytest
           EXIT_CODE=$?
           set -e
 
