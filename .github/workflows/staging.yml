@@ -110,6 +110,7 @@ jobs:
           exit-code: '1'
           severity: 'HIGH,CRITICAL'
           ignore-unfixed: true
+          trivyignores: '.trivyignore'
 
       - name: Deploy to staging via SSM Run Command
         run: |
