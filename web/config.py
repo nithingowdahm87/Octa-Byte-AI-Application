@@ -7,7 +7,7 @@ is_local_compose = 'POSTGRES_PASSWORD_FILE' in os.environ or DEBUG
 # 1. DATABASE_USERNAME
 _db_user = os.environ.get('DATABASE_USERNAME') or os.environ.get('DB_USER')
 if not _db_user and 'POSTGRES_USER_FILE' in os.environ:
-    with open(os.environ['POSTGRES_USER_FILE']) as f:
+    with open(os.environ['POSTGRES_USER_FILE'], encoding='utf-8') as f:
         _db_user = f.read().strip()
 if not _db_user:
     _db_user = 'postgres'
@@ -15,7 +15,7 @@ if not _db_user:
 # 2. DATABASE_PASSWORD
 _db_pass = os.environ.get('DATABASE_PASSWORD') or os.environ.get('DB_PASS')
 if not _db_pass and 'POSTGRES_PASSWORD_FILE' in os.environ:
-    with open(os.environ['POSTGRES_PASSWORD_FILE']) as f:
+    with open(os.environ['POSTGRES_PASSWORD_FILE'], encoding='utf-8') as f:
         _db_pass = f.read().strip()
 
 if not _db_pass and not is_local_compose:
