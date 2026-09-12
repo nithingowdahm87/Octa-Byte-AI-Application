@@ -1,24 +1,38 @@
-FROM python:3.12-alpine
+# ---------- Builder stage ----------
+FROM python:3.12-alpine AS builder
 
-# Upgrade OS packages and install build dependencies
 RUN apk update && apk upgrade && \
     apk add --no-cache postgresql-dev gcc python3-dev musl-dev
 
-# Run as non-root user
-RUN adduser -D appuser
-WORKDIR /home/appuser
+WORKDIR /build
 
 COPY requirements.txt requirements.txt
 
-# Create venv and install dependencies
-RUN python -m venv /venv && \
-    /venv/bin/pip install --upgrade pip setuptools && \
-    /venv/bin/pip install -r requirements.txt
+ENV PIP_NO_CACHE_DIR=1
 
-# Remove system-level setuptools, pip, and msgpack to silence Trivy false positives on the base image
-RUN find /usr -name "setuptools*" -exec rm -rf {} + || true && \
-    find /usr -name "msgpack*" -exec rm -rf {} + || true && \
-    find /usr -name "pip*" -exec rm -rf {} + || true
+# Create venv, upgrade pip/setuptools to patched versions, install deps.
+# Pinning setuptools/msgpack floors here guards against any transitive
+# build-time resolution pulling a vulnerable version.
+RUN python -m venv /venv && \
+    /venv/bin/pip install --no-cache-dir --upgrade "pip>=24" "setuptools>=78.1.1" && \
+    /venv/bin/pip install --no-cache-dir "msgpack>=1.2.1" && \
+    /venv/bin/pip install --no-cache-dir -r requirements.txt
+
+# Belt-and-braces: purge any pip cache/build leftovers before the copy.
+RUN rm -rf /root/.cache/pip /root/.cache/* /tmp/*
+
+# ---------- Final stage ----------
+FROM python:3.12-alpine
+
+RUN apk update && apk upgrade --no-cache && \
+    apk add --no-cache libpq
+
+RUN adduser -D appuser
+WORKDIR /home/appuser
+
+# Only the clean venv is brought over -- no build tools, no pip cache,
+# no leftover wheels from the builder stage.
+COPY --from=builder /venv /venv
 
 COPY . .
 
