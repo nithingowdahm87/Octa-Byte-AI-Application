@@ -28,14 +28,14 @@ def test_database_host_produces_uri_using_db():
         import config
         import importlib
         importlib.reload(config)
-        assert 'postgresql://postgres:pass@db:5432/postgres' == config.BaseConfig.SQLALCHEMY_DATABASE_URI
+        assert 'postgresql://postgres:pass@db:5432/postgres' == config.BaseConfig.SQLALCHEMY_DATABASE_URI.render_as_string(hide_password=False)
 
 def test_passwords_with_special_characters_handled():
     with mock.patch.dict(os.environ, {"DATABASE_HOST": "db", "DATABASE_PASSWORD": "my@!password?"}, clear=True):
         import config
         import importlib
         importlib.reload(config)
-        assert 'my%40%21password%3F' in config.BaseConfig.SQLALCHEMY_DATABASE_URI
+        assert 'my%40%21password%3F' in config.BaseConfig.SQLALCHEMY_DATABASE_URI.render_as_string(hide_password=False)
 
 def test_ready_health_check_handles_unavailable_db():
     with mock.patch.dict(os.environ, {"DATABASE_HOST": "invalid_host", "DATABASE_PASSWORD": "pass", "DEBUG": "False"}, clear=True):
