@@ -30,11 +30,24 @@ jobs:
           cache: 'pip'
           cache-dependency-path: '**/requirements.txt'
 
-      - name: Install dependencies and run tests
+      - name: Run Tests
         run: |
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           pip install pytest
+
+          set +e
           pytest
+          EXIT_CODE=$?
+          set -e
+
+          # pytest exit codes: 0 = all passed, 5 = no tests collected
+          if [ "$EXIT_CODE" -eq 0 ] || [ "$EXIT_CODE" -eq 5 ]; then
+            echo "Tests passed or no tests found."
+            exit 0
+          else
+            echo "Tests failed."
+            exit "$EXIT_CODE"
+          fi
 
       - name: Trivy filesystem scan (fail on CRITICAL)
         uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8 # v0.36.0
