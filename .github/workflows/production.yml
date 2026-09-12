@@ -84,17 +84,30 @@ jobs:
 
       - name: Deploy to inactive slot ASG via SSM
         run: |
+          echo "Waiting for SSM agent to be online..."
+          for i in {1..30}; do
+            INSTANCE_ID=$(aws ssm describe-instance-information --filters "Key=tag:Environment,Values=production" "Key=tag:Slot,Values=${{ env.INACTIVE_SLOT }}" --query 'InstanceInformationList[?PingStatus==`Online`].InstanceId' --output text | awk '{print $1}')
+            if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "None" ]; then
+              echo "Found online instance: $INSTANCE_ID"
+              break
+            fi
+            echo "Waiting..."
+            sleep 10
+          done
+
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" == "None" ]; then
+            echo "Error: No online SSM instances found for deployment in slot ${{ env.INACTIVE_SLOT }}"
+            exit 1
+          fi
+
           COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets "Key=tag:Slot,Values=${{ env.INACTIVE_SLOT }}" \
+            --targets "Key=InstanceIds,Values=$INSTANCE_ID" \
             --parameters "{\"commands\":[\"/opt/octabyte-nithin/bin/deploy.sh ${{ env.IMAGE_URI }}\"]}" \
             --query "Command.CommandId" \
             --output text)
           
-          INSTANCE_ID=$(aws ssm list-command-invocations --command-id "$COMMAND_ID" --query 'CommandInvocations[0].InstanceId' --output text)
-          if [ "$INSTANCE_ID" != "None" ] && [ -n "$INSTANCE_ID" ]; then
-            aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
-          fi
+          aws ssm wait command-executed --command-id "$COMMAND_ID" --instance-id "$INSTANCE_ID"
 
       - name: Set deployment state to CANARY_IN_PROGRESS
         run: |
