@@ -21,25 +21,26 @@ services:
     restart: always
     build: ./web
     links:
-      - postgres:postgres
+      - db:db
     secrets:
       - postgres_user
       - postgres_password
     environment:
       DEBUG: "False"
-      POSTGRES_DB: db
+      DATABASE_HOST: db
+      DATABASE_NAME: db
       DATABASE_PORT: 5432
       POSTGRES_USER_FILE: /run/secrets/postgres_user
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     expose:
       - "8000"
     depends_on:
-      - postgres
+      - db
     command: >
       sh -c "python3 ./create_db.py &&
              gunicorn -w 2 -b :8000 app:app"
 
-  postgres:
+  db:
     restart: always
     image: postgres:latest
     volumes:
